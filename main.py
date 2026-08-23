@@ -3,11 +3,11 @@ import requests
 import numpy as np
 
 # =========================================================================
-# زانیارییەکانی هەژماری مێتاتڕەیدەر ٥ (MT5):
+# زانیارییەکانی هەژماری FxPro MT5:
 # =========================================================================
 MT5_USER = "5036292718"              # ژمارەی ئەکاونتەکەت
 MT5_PASSWORD = "تێپەڕەوشەکەت"        # تێپەڕەوشەی ئەکاونتەکەت لێرە بنووسە
-MT5_SERVER = "FxPro-MT5 Demo"   # ناوی سێرڤەری برۆکەرەکەت لە ناو MT5
+MT5_SERVER = "FxPro-MT5 Demo"        # سێرڤەری FxPro
 
 SYMBOL = "BTCUSD"                    # هێمای بیتکۆین
 LOT_SIZE = 0.01                      # قەبارەی لۆت
@@ -17,46 +17,30 @@ BASE_URL = "https://mt5.mtapi.io"
 SL_PERCENT = 0.008  # 0.8% ستۆپ لۆس
 TP_PERCENT = 0.016  # 1.6% تێک پرۆفیت
 
+# لیستی ناوی سێرڤەرەکانی FxPro بۆ دڵنیابوونەوەی زیاتر
+SERVER_CANDIDATES = [MT5_SERVER, "FxPro-MT5", "FxPro.com-Demo", "FxPro-Demo01"]
+
 def get_token():
-    print(f"دەستکرا بە پەیوەستبوون بە سێرڤەر ({MT5_SERVER}) بە ئەکاونتی: {MT5_USER}...")
-    
-    # هەوڵدان بۆ پەیوەستبوون لە ڕێگەی ناوی سێرڤەر (ConnectEx)
-    url_ex = f"{BASE_URL}/ConnectEx"
-    params_ex = {
-        "user": MT5_USER,
-        "password": MT5_PASSWORD,
-        "serverName": MT5_SERVER
-    }
-    
-    try:
-        res = requests.get(url_ex, params=params_ex, timeout=30)
-        token = res.text.strip('"').strip()
-        
-        if res.status_code == 200 and "CONNECT_ERROR" not in token and "Disconnected" not in token:
-            print(f"پەیوەست بوو! Token بە سەرکەوتوویی وەرگیرا.")
-            return token
-            
-        # ئەگەر ConnectEx وەڵامی نەدایەوە، هەوڵ دەدات لە ڕێگەی Connect
-        url = f"{BASE_URL}/Connect"
+    for srv in SERVER_CANDIDATES:
+        print(f"دەستکرا بە پەیوەستبوون بە سێرڤەری ({srv}) بە ئەکاونتی: {MT5_USER}...")
+        url = f"{BASE_URL}/ConnectEx"
         params = {
             "user": MT5_USER,
             "password": MT5_PASSWORD,
-            "host": MT5_SERVER,
-            "port": "443"
+            "serverName": srv
         }
-        res2 = requests.get(url, params=params, timeout=30)
-        token2 = res2.text.strip('"').strip()
-        
-        if res2.status_code == 200 and "CONNECT_ERROR" not in token2 and "Disconnected" not in token2:
-            print(f"پەیوەست بوو! Token بە سەرکەوتوویی وەرگیرا.")
-            return token2
-        else:
-            print(f"هەڵە لە پەیوەستبوون بە سێرڤەر: {token2}")
-            return None
+        try:
+            res = requests.get(url, params=params, timeout=30)
+            token = res.text.strip('"').strip()
             
-    except Exception as e:
-        print(f"هەڵەی تۆڕ: {e}")
-        return None
+            if res.status_code == 200 and "CONNECT_ERROR" not in token and "Disconnected" not in token and len(token) > 5:
+                print(f"پەیوەست بوو بە سەرکەوتوویی بە سێرڤەری {srv}!")
+                return token
+        except Exception as e:
+            print(f"هەڵە لە پەیوەستبوون بە {srv}: {e}")
+            
+    print("نەتوانرا پەیوەندی دروست بکرێت. تکایە دڵنیابە لە دروستی تێپەڕەوشە (Password).")
+    return None
 
 def calculate_indicators(closes):
     w_fast = np.exp(np.linspace(-1., 0., 9))
@@ -110,7 +94,7 @@ def main():
         time.sleep(15)
         token = get_token()
 
-    print(f"بۆتەکە چالاکە و چاودێری بازاڕی {SYMBOL} دەکات...")
+    print(f"بۆتەکە چالاکە و چاودێری بازاڕی {SYMBOL} دەکات لەسەر FxPro...")
 
     while True:
         try:
