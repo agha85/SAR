@@ -24,32 +24,21 @@ def connect_account():
         return False
 
 def modify_sl(ticket, new_sl):
-    print(f"[Action] هەوڵی جوڵاندنی SL بۆ ئۆردەری {ticket} بۆ نرخی {new_sl}...")
+    print(f"[Action] VIROS هەوڵ دەدات SL بۆ ئۆردەری {ticket} بکات بە {new_sl}...")
     params = {
         "id": SESSION_TOKEN,
         "ticket": ticket,
         "sl": new_sl
     }
     try:
-        # ناردنی فەرمانی گۆڕین بۆ برۆکەرەکە
         response = requests.get(f"{API_URL}/OrderModify", params=params, timeout=20)
-        if response.status_code == 200:
-            print(f"[Success] قەڵغانەکە (SL) بە سەرکەوتوویی ڕاکێشرا بۆ {new_sl}!")
-        else:
-            print(f"[Failed] کێشە لە جوڵاندن: {response.text}")
+        print(f"[Result] وەڵامی برۆکەر: {response.text}")
     except Exception as e:
-        print(f"[Error] هەڵە لە ناردنی فەرمان: {e}")
-
-def get_sar_value(symbol):
-    # لێرەدا پێویستمان بە لینکی تایبەتە بە ئیندیکەیتەرەکان لە mtapi.io
-    # بۆ نموونە: دەبێت داوای خاڵی iSAR بکەین لەسەر فڕەیمی 15 خولەک
-    # لەبەر ئەوەی هێشتا لینکە تەواوەکەمان نییە، بۆ تاقیکردنەوە ژمارەیەکی خەیاڵی دەگەڕێنینەوە
-    # دواتر ئەم بەشە بە داتای ڕاستەقینە پڕ دەکەینەوە
-    return 60000.00  # نموونە: گریمان خاڵی SAR لەسەر 60,000 دۆلارە
+        print(f"[Error] کێشە لە ناردنی فەرمان: {e}")
 
 def start_sar_engine():
     global SESSION_TOKEN
-    print(f"[VIROS-SAR] مەکینەی جوڵاندن دەستی پێکرد | Account: {ACCOUNT_ID}")
+    print(f"[VIROS🐉] مەکینەی تاقیکردنەوەی جوڵە دەستی پێکرد | Account: {ACCOUNT_ID}")
     
     while True:
         try:
@@ -70,31 +59,29 @@ def start_sar_engine():
                         if "BTC" in symbol.upper() or "BITCOIN" in symbol.upper():
                             ticket = pos.get("Ticket", pos.get("ticket"))
                             current_sl = pos.get("StopLoss", pos.get("sl", 0))
-                            pos_type = pos.get("Type", pos.get("type")) # 0 = Buy, 1 = Sell
+                            open_price = pos.get("OpenPrice", pos.get("openPrice", 0))
+                            pos_type = pos.get("Type", pos.get("type"))
                             
-                            print(f"[Tracking] بیتکۆین | Ticket: {ticket} | SL ئێستا: {current_sl}")
+                            # لێرەدا هەموو زانیارییەکان چاپ دەکەین بۆ ئەوەی فۆرماتەکە ببینین
+                            print(f"[Tracking] Ticket: {ticket} | Type: {pos_type} | Open: {open_price} | SL: {current_sl}")
                             
-                            # وەرگرتنی خاڵی نوێی SAR
-                            new_sar_point = get_sar_value(symbol)
-                            
-                            # لۆژیکی بڕیاردان بۆ جوڵاندن
-                            if pos_type == 0:  # ئەگەر ئۆردەرەکە Buy بوو
-                                if new_sar_point > current_sl:
-                                    modify_sl(ticket, new_sar_point)
-                            
-                            elif pos_type == 1:  # ئەگەر ئۆردەرەکە Sell بوو
-                                if current_sl == 0 or new_sar_point < current_sl:
-                                    modify_sl(ticket, new_sar_point)
-
+                            # ئەگەر ستۆپ لۆسەکە سفر بوو، بە زۆر دەیگۆڕین بۆ تاقیکردنەوە
+                            if current_sl == 0 and open_price > 0:
+                                # ئەگەر بای بێت، ستۆپ لۆس دەخەینە ٥٠٠ دۆلار خوارەوەی نرخی کڕین
+                                if pos_type == 0 or str(pos_type).lower() == "buy":
+                                    modify_sl(ticket, open_price - 500)
+                                # ئەگەر سێڵ بێت، دەيخەینە ٥٠٠ دۆلار سەرووە
+                                elif pos_type == 1 or str(pos_type).lower() == "sell":
+                                    modify_sl(ticket, open_price + 500)
                 else:
-                    print("[Idle] چاوەڕێی ئۆردەری نوێ دەکات...")
+                    print("[Idle] هیچ ئۆردەرێک نییە...")
             else:
                 SESSION_TOKEN = ""
 
         except Exception as e:
             print(f"[Loop Error] {e}")
 
-        time.sleep(30)
+        time.sleep(15)
 
 if __name__ == "__main__":
     start_sar_engine()
