@@ -12,31 +12,44 @@ SESSION_TOKEN = ""
 def connect_account():
     global SESSION_TOKEN
     print("[Connect] هەوڵی بەستنەوە دەدات بە برۆکەرەوە...")
-    
-    params = {
-        "user": ACCOUNT_ID,
-        "password": PASSWORD,
-        "server": SERVER
-    }
-    
+    params = {"user": ACCOUNT_ID, "password": PASSWORD, "server": SERVER}
     try:
         response = requests.get(f"{API_URL}/ConnectEx", params=params, timeout=30)
-        
         if response.status_code == 200:
-            result = response.text.replace('"', '').strip()
-            SESSION_TOKEN = result
+            SESSION_TOKEN = response.text.replace('"', '').strip()
             print(f"[Success] پەیوەندی بەسترا! Token: {SESSION_TOKEN[:10]}...")
             return True
-        else:
-            print(f"[Failed] نەتوانرا پەیوەندی ببەسترێت: {response.text}")
-            return False
-    except Exception as e:
-        print(f"[Error] هەڵە لە کاتی کۆنێکت بوون: {e}")
         return False
+    except:
+        return False
+
+def modify_sl(ticket, new_sl):
+    print(f"[Action] هەوڵی جوڵاندنی SL بۆ ئۆردەری {ticket} بۆ نرخی {new_sl}...")
+    params = {
+        "id": SESSION_TOKEN,
+        "ticket": ticket,
+        "sl": new_sl
+    }
+    try:
+        # ناردنی فەرمانی گۆڕین بۆ برۆکەرەکە
+        response = requests.get(f"{API_URL}/OrderModify", params=params, timeout=20)
+        if response.status_code == 200:
+            print(f"[Success] قەڵغانەکە (SL) بە سەرکەوتوویی ڕاکێشرا بۆ {new_sl}!")
+        else:
+            print(f"[Failed] کێشە لە جوڵاندن: {response.text}")
+    except Exception as e:
+        print(f"[Error] هەڵە لە ناردنی فەرمان: {e}")
+
+def get_sar_value(symbol):
+    # لێرەدا پێویستمان بە لینکی تایبەتە بە ئیندیکەیتەرەکان لە mtapi.io
+    # بۆ نموونە: دەبێت داوای خاڵی iSAR بکەین لەسەر فڕەیمی 15 خولەک
+    # لەبەر ئەوەی هێشتا لینکە تەواوەکەمان نییە، بۆ تاقیکردنەوە ژمارەیەکی خەیاڵی دەگەڕێنینەوە
+    # دواتر ئەم بەشە بە داتای ڕاستەقینە پڕ دەکەینەوە
+    return 60000.00  # نموونە: گریمان خاڵی SAR لەسەر 60,000 دۆلارە
 
 def start_sar_engine():
     global SESSION_TOKEN
-    print(f"[VIROS-SAR] دەستی بە کار کرد | Account: {ACCOUNT_ID}")
+    print(f"[VIROS-SAR] مەکینەی جوڵاندن دەستی پێکرد | Account: {ACCOUNT_ID}")
     
     while True:
         try:
@@ -51,18 +64,31 @@ def start_sar_engine():
             if response.status_code == 200:
                 positions = response.json()
                 if isinstance(positions, list) and len(positions) > 0:
-                    print(f"[Active] {len(positions)} پۆزیشن دۆزرایەوە.")
                     for pos in positions:
                         symbol = pos.get("Symbol", pos.get("symbol", ""))
-                        # گۆڕانکارییەکە لێرەدایە: چاودێری بیتکۆین دەکات
+                        
                         if "BTC" in symbol.upper() or "BITCOIN" in symbol.upper():
                             ticket = pos.get("Ticket", pos.get("ticket"))
-                            sl = pos.get("StopLoss", pos.get("sl", 0))
-                            print(f"[Tracking] بیتکۆین | Ticket: {ticket} | SL: {sl}")
+                            current_sl = pos.get("StopLoss", pos.get("sl", 0))
+                            pos_type = pos.get("Type", pos.get("type")) # 0 = Buy, 1 = Sell
+                            
+                            print(f"[Tracking] بیتکۆین | Ticket: {ticket} | SL ئێستا: {current_sl}")
+                            
+                            # وەرگرتنی خاڵی نوێی SAR
+                            new_sar_point = get_sar_value(symbol)
+                            
+                            # لۆژیکی بڕیاردان بۆ جوڵاندن
+                            if pos_type == 0:  # ئەگەر ئۆردەرەکە Buy بوو
+                                if new_sar_point > current_sl:
+                                    modify_sl(ticket, new_sar_point)
+                            
+                            elif pos_type == 1:  # ئەگەر ئۆردەرەکە Sell بوو
+                                if current_sl == 0 or new_sar_point < current_sl:
+                                    modify_sl(ticket, new_sar_point)
+
                 else:
-                    print("[Idle] هیچ پۆزیشنێکی کراوە نییە لە ئێستادا.")
+                    print("[Idle] چاوەڕێی ئۆردەری نوێ دەکات...")
             else:
-                print(f"[API Error] تۆکنەکە کێشەی هەیە یان بەسەرچووە: {response.text}")
                 SESSION_TOKEN = ""
 
         except Exception as e:
