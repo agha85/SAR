@@ -20,7 +20,6 @@ def connect_account():
     }
     
     try:
-        # لێرەدا کێشەکەمان چارەسەر کرد و کردمان بە ConnectEx
         response = requests.get(f"{API_URL}/ConnectEx", params=params, timeout=30)
         
         if response.status_code == 200:
@@ -55,10 +54,11 @@ def start_sar_engine():
                     print(f"[Active] {len(positions)} پۆزیشن دۆزرایەوە.")
                     for pos in positions:
                         symbol = pos.get("Symbol", pos.get("symbol", ""))
-                        if "XAUUSD" in symbol.upper() or "GOLD" in symbol.upper():
+                        # گۆڕانکارییەکە لێرەدایە: چاودێری بیتکۆین دەکات
+                        if "BTC" in symbol.upper() or "BITCOIN" in symbol.upper():
                             ticket = pos.get("Ticket", pos.get("ticket"))
                             sl = pos.get("StopLoss", pos.get("sl", 0))
-                            print(f"[Tracking] ئاڵتوون | Ticket: {ticket} | SL: {sl}")
+                            print(f"[Tracking] بیتکۆین | Ticket: {ticket} | SL: {sl}")
                 else:
                     print("[Idle] هیچ پۆزیشنێکی کراوە نییە لە ئێستادا.")
             else:
