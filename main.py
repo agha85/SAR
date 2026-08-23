@@ -38,7 +38,7 @@ def modify_sl(ticket, new_sl):
 
 def start_sar_engine():
     global SESSION_TOKEN
-    print(f"[VIROS🐉] مەکینەی تاقیکردنەوەی جوڵە دەستی پێکرد | Account: {ACCOUNT_ID}")
+    print(f"[VIROS🐉] پشکنەری داتا دەستی پێکرد | Account: {ACCOUNT_ID}")
     
     while True:
         try:
@@ -57,22 +57,16 @@ def start_sar_engine():
                         symbol = pos.get("Symbol", pos.get("symbol", ""))
                         
                         if "BTC" in symbol.upper() or "BITCOIN" in symbol.upper():
+                            # لێرەدا تەواوی داتاکە وەک خۆی چاپ دەکەین بۆ ئەوەی وشە ڕاستەقینەکە بدۆزینەوە
+                            print(f"[RAW DATA] تەواوی زانیارییەکان: {pos}")
+                            
                             ticket = pos.get("Ticket", pos.get("ticket"))
                             current_sl = pos.get("StopLoss", pos.get("sl", 0))
                             open_price = pos.get("OpenPrice", pos.get("openPrice", 0))
-                            pos_type = pos.get("Type", pos.get("type"))
                             
-                            # لێرەدا هەموو زانیارییەکان چاپ دەکەین بۆ ئەوەی فۆرماتەکە ببینین
-                            print(f"[Tracking] Ticket: {ticket} | Type: {pos_type} | Open: {open_price} | SL: {current_sl}")
-                            
-                            # ئەگەر ستۆپ لۆسەکە سفر بوو، بە زۆر دەیگۆڕین بۆ تاقیکردنەوە
+                            # تاقیکردنەوەیەکی کوێرانە: ئەگەر ستۆپ لۆس سفر بوو، ٥٠٠ دۆلار لە خوار نرخی کردنەوە دایدەنێین
                             if current_sl == 0 and open_price > 0:
-                                # ئەگەر بای بێت، ستۆپ لۆس دەخەینە ٥٠٠ دۆلار خوارەوەی نرخی کڕین
-                                if pos_type == 0 or str(pos_type).lower() == "buy":
-                                    modify_sl(ticket, open_price - 500)
-                                # ئەگەر سێڵ بێت، دەيخەینە ٥٠٠ دۆلار سەرووە
-                                elif pos_type == 1 or str(pos_type).lower() == "sell":
-                                    modify_sl(ticket, open_price + 500)
+                                modify_sl(ticket, open_price - 500)
                 else:
                     print("[Idle] هیچ ئۆردەرێک نییە...")
             else:
