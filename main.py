@@ -7,14 +7,12 @@ ACCOUNT_ID = os.getenv("MT5_ACCOUNT")
 PASSWORD = os.getenv("MT5_PASSWORD")
 SERVER = os.getenv("MT5_SERVER")
 
-# تۆکنەکە لێرەدا هەڵدەگرین دوای ئەوەی کۆنێکت بووین
 SESSION_TOKEN = ""
 
 def connect_account():
     global SESSION_TOKEN
     print("[Connect] هەوڵی بەستنەوە دەدات بە برۆکەرەوە...")
     
-    # بەپێی وێنەکەی خۆت، دەبێت ژمارەی هەژمارەکە بخرێتە ناو 'user'
     params = {
         "user": ACCOUNT_ID,
         "password": PASSWORD,
@@ -22,10 +20,10 @@ def connect_account():
     }
     
     try:
-        response = requests.get(f"{API_URL}/Connect", params=params, timeout=30)
+        # لێرەدا کێشەکەمان چارەسەر کرد و کردمان بە ConnectEx
+        response = requests.get(f"{API_URL}/ConnectEx", params=params, timeout=30)
         
         if response.status_code == 200:
-            # وەرگرتنی تۆکنەکە لە سایتەکەوە
             result = response.text.replace('"', '').strip()
             SESSION_TOKEN = result
             print(f"[Success] پەیوەندی بەسترا! Token: {SESSION_TOKEN[:10]}...")
@@ -43,13 +41,11 @@ def start_sar_engine():
     
     while True:
         try:
-            # ئەگەر تۆکنمان نەبوو، یەکەم جار کۆنێکت دەبین
             if not SESSION_TOKEN:
                 if not connect_account():
                     time.sleep(15)
                     continue
 
-            # ئێستا تەنها تۆکنەکە دەنێرین بۆ وەرگرتنی ئۆردەرەکان لەناو 'id'
             params = {"id": SESSION_TOKEN}
             response = requests.get(f"{API_URL}/OpenedOrders", params=params, timeout=20)
             
@@ -67,13 +63,11 @@ def start_sar_engine():
                     print("[Idle] هیچ پۆزیشنێکی کراوە نییە لە ئێستادا.")
             else:
                 print(f"[API Error] تۆکنەکە کێشەی هەیە یان بەسەرچووە: {response.text}")
-                # بەتاڵکردنەوەی تۆکنەکە بۆ ئەوەی خولی داهاتوو سەرلەنوێ کۆنێکت بێتەوە
                 SESSION_TOKEN = ""
 
         except Exception as e:
             print(f"[Loop Error] {e}")
 
-        # چاوەڕێکردن بۆ ٣٠ چرکە
         time.sleep(30)
 
 if __name__ == "__main__":
