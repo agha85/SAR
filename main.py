@@ -9,7 +9,9 @@ SERVER = os.getenv("MT5_SERVER")
 
 SYMBOL = "BITCOIN"     
 LOT_SIZE = 0.01        
-GAP_SIZE = 0.10        
+# بۆ بیتکۆین ١.٠ دۆلار جوڵەی نرخ دەکاتە ڕێک ١ سەنت زەرەر 
+# (کاتێک ئیشت لەسەر ئاڵتوون کرد، ئەمە بکە بە 0.01)
+PRICE_GAP = 1.0        
 
 SESSION_TOKEN = ""
 
@@ -26,13 +28,9 @@ def connect_account():
         response = requests.get(f"{API_URL}/ConnectEx", params=params, timeout=30)
         if response.status_code == 200:
             SESSION_TOKEN = response.text.replace('"', '').strip()
-            print(f"[Success] پەیوەندی بەسترا! Token: {SESSION_TOKEN[:10]}...")
             return True
-        else:
-            print(f"[Failed] سێرڤەر ڕەتی کردەوە: {response.text}")
-            return False
-    except Exception as e:
-        print(f"[Error] کێشەی هێڵ: {e}")
+        return False
+    except:
         return False
 
 def open_order(cmd_type_str):
@@ -45,10 +43,9 @@ def open_order(cmd_type_str):
         "volume": LOT_SIZE
     }
     try:
-        res = requests.get(f"{API_URL}/OrderSend", params=params, timeout=20)
-        print(f"[Result] وەڵامی برۆکەر: {res.text}\n")
-    except Exception as e:
-        print(f"[Error] هەڵە لە کردنەوە: {e}")
+        requests.get(f"{API_URL}/OrderSend", params=params, timeout=20)
+    except:
+        pass
 
 def modify_sl(ticket, new_sl):
     new_sl = round(new_sl, 2)
@@ -59,14 +56,14 @@ def modify_sl(ticket, new_sl):
     }
     try:
         res = requests.get(f"{API_URL}/OrderModify", params=params, timeout=20)
-        if "SAME_PARAMS" not in res.text:
+        if "SAME_PARAMS" not in res.text and res.status_code == 200:
             print(f"[Trailing] 🛡️ قەڵغان ڕاکێشرا بۆ: {new_sl}")
     except:
         pass
 
 def start_sar_engine():
     global SESSION_TOKEN
-    print(f"[VIROS🐉] مەکینەی Reversal دەستی پێکرد...")
+    print(f"[VIROS🐉] مەکینەی Reversal (بەمەرجی چوونە خێرەوە - ١ سەنت) دەستی پێکرد...")
     
     while True:
         try:
@@ -95,24 +92,28 @@ def start_sar_engine():
                     last_position["ticket"] = ticket
                     last_position["type"] = str(order_type)
                     
+                    # ١. دانانی ستۆپ لۆسی سەرەتایی (ڕێک ١ سەنت زەرەر)
                     if sl == 0:
                         if str(order_type).lower() == "buy" or order_type == 0:
-                            modify_sl(ticket, open_price - GAP_SIZE)
+                            modify_sl(ticket, open_price - PRICE_GAP)
                         else:
-                            modify_sl(ticket, open_price + GAP_SIZE)
+                            modify_sl(ticket, open_price + PRICE_GAP)
                     
-                    elif current_price > 0 and current_price != open_price:
+                    # ٢. جوڵاندنی ستۆپ لۆس (تەنها ئەگەر چووە خێرەوە)
+                    elif current_price > 0:
                         if str(order_type).lower() == "buy" or order_type == 0:
-                            potential_sl = current_price - GAP_SIZE
-                            if potential_sl > sl:
-                                modify_sl(ticket, potential_sl)
+                            if current_price > open_price:
+                                potential_sl = current_price - PRICE_GAP
+                                if potential_sl > sl:
+                                    modify_sl(ticket, potential_sl)
                         else:
-                            potential_sl = current_price + GAP_SIZE
-                            if potential_sl < sl and potential_sl > 0:
-                                modify_sl(ticket, potential_sl)
+                            if current_price < open_price:
+                                potential_sl = current_price + PRICE_GAP
+                                if potential_sl < sl and potential_sl > 0:
+                                    modify_sl(ticket, potential_sl)
                 else:
                     if last_position["ticket"] is not None:
-                        print(f"\n[Reverse] 🚨 لە ستۆپی دا! ڕاستەوخۆ پێچەوانەی دەکاتەوە...")
+                        print(f"\n[Reverse] 🚨 لە ستۆپی دا (١ سەنت زەرەر)! ڕاستەوخۆ پێچەوانەی دەکاتەوە...")
                         next_type = "Sell" if (str(last_position["type"]).lower() == "buy" or last_position["type"] == 0) else "Buy"
                         open_order(next_type)
                         last_position["ticket"] = None
@@ -120,7 +121,6 @@ def start_sar_engine():
                         print("[Start] مەکینەکە دەست پێ دەکات...")
                         open_order("Buy")
             else:
-                print(f"[API Error] کێشە لە وەرگرتنی داتا: {response.text}")
                 SESSION_TOKEN = ""
 
         except Exception as e:
