@@ -2,24 +2,24 @@ import time
 import requests
 import numpy as np
 
-# ==========================================
-# ١. زانیارییەکانت ڕاستەوخۆ لێرە لە ناو کەوانەکان بنووسە:
-# ==========================================
-MT5_USER = "12345678"          # ژمارەی ئەکاونتی MT5 لێرە بنووسە
-MT5_PASSWORD = "Password123"   # تێپەڕەوشەی ئەکاونتەکەت لێرە بنووسە
-MT5_HOST = "broker.server.com" # ناوی سێرڤەر یان ئایپی لێرە بنووسە
+# =========================================================================
+# تکایە ئەم ٣ دێڕە بە زانیارییە ڕاستەقینەکانی ناو ئەپی MT5 پڕبکەرەوە:
+# =========================================================================
+MT5_USER = "ژمارەی_ئەکاونتەکەت"        # بۆ نموونە: "50123456"
+MT5_PASSWORD = "تێپەڕەوشەکەت"        # تێپەڕەوشەکەت لێرە بنووسە
+MT5_HOST = "ناوی_سێرڤەرەکەت"          # بۆ نموونە: "JustMarkets-Demo" یان ئایپی سێرڤەر
 MT5_PORT = "443"
 
-SYMBOL = "BTCUSD"              # هێمای بیتکۆین
+SYMBOL = "BTCUSD"
 LOT_SIZE = 0.01
-TIMEFRAME = 5                  # تایم فڕەیمی ٥ خولەکی
+TIMEFRAME = 5
 BASE_URL = "https://mt5.mtapi.io"
 
 SL_PERCENT = 0.008  # 0.8% ستۆپ لۆس
 TP_PERCENT = 0.016  # 1.6% تێک پرۆفیت
 
 def get_token():
-    print(f"دەستکرا بە پەیوەستبوون بە سێرڤەر بە ئەکاونتی: {MT5_USER}...")
+    print(f"دەستکرا بە پەیوەستبوون بە سێرڤەر ({MT5_HOST}) بە ئەکاونتی: {MT5_USER}...")
     url = f"{BASE_URL}/Connect"
     params = {
         "user": MT5_USER,
@@ -29,11 +29,17 @@ def get_token():
     }
     try:
         response = requests.get(url, params=params, timeout=30)
-        token = response.text.strip('"').strip()
-        print(f"وەڵامی سێرڤەر: {token}")
-        return token
+        res_text = response.text.strip('"').strip()
+        
+        # ئەگەر هەڵە هەبوو Token وەرناگرێت
+        if "CONNECT_ERROR" in res_text or "Disconnected" in res_text or response.status_code != 200:
+            print(f"هەڵە لە زانیارییەکانی سێرڤەر/ئەکاونت: {res_text}")
+            return None
+            
+        print(f"پەیوەست بوو! Token بە سەرکەوتوویی وەرگیرا.")
+        return res_text
     except Exception as e:
-        print(f"هەڵە لە پەیوەستبوون: {e}")
+        print(f"هەڵەی پەیوەستبوون: {e}")
         return None
 
 def calculate_indicators(closes):
@@ -77,15 +83,15 @@ def send_order(token, operation, price, sl, tp):
     }
     try:
         res = requests.get(url, params=params, timeout=15)
-        print(f"ئەنجامی ناردنی فەرمان ({operation}): {res.text}")
+        print(f"فەرمانی بازرگانی ({operation}) جێبەجێ کرا: {res.text}")
     except Exception as e:
         print(f"هەڵە لە ناردنی فەرمان: {e}")
 
 def main():
     token = get_token()
     while not token:
-        print("دووبارە هەوڵ دەدرێتەوە دوای ١٠ چرکە...")
-        time.sleep(10)
+        print("دووبارە هەوڵ دەدرێتەوە دوای ١٥ چرکە...")
+        time.sleep(15)
         token = get_token()
 
     print(f"بۆتەکە چالاکە و چاودێری بازاڕی {SYMBOL} دەکات...")
