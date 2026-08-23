@@ -1,151 +1,135 @@
 import os
 import time
 import requests
+import numpy as np
 
-API_URL = "https://mt5.mtapi.io"
-ACCOUNT_ID = os.getenv("MT5_ACCOUNT")
-PASSWORD = os.getenv("MT5_PASSWORD")
-SERVER = os.getenv("MT5_SERVER")
+BASE_URL = "https://mt5.mtapi.io"
 
-SYMBOL = "BITCOIN"     
-LOT_SIZE = 0.01        
-PRICE_GAP = 1.0        # بۆشایی ١ سەنت (١ دۆلار لە نرخی بیتکۆین)
+# زانیاری هەژماری MT5 لە ڕێگەی Variables لەسەر Railway وەردەگیرێت
+MT5_USER = os.getenv("MT5_USER")          # ژمارەی هەژمارەکەت (Account Number)
+MT5_PASSWORD = os.getenv("MT5_PASSWORD")  # تێپەڕەوشەی هەژمارەکەت (Password)
+MT5_HOST = os.getenv("MT5_HOST")          # هۆست یان ئایپی برۆکەر (بۆ نموونە: 198.51.100.1 یان ناوی سێرڤەر)
+MT5_PORT = os.getenv("MT5_PORT", "443")   # پۆرت (بە گشتی 443 یان 1950)
 
-SESSION_TOKEN = ""
+SYMBOL = "XAUUSD"
+LOT_SIZE = 0.01
+TIMEFRAME = 1  # 1 خولەکی (M1)
 
-last_position = {
-    "ticket": None,
-    "type": None
-}
-
-# بۆ پاراستنی بەرزی و نزمی ستۆپ بۆ ئەوەی هەرگیز بۆ دواوە نەگەڕێتەوە
-highest_price_seen = 0.0
-lowest_price_seen = 0.0
-
-def connect_account():
-    global SESSION_TOKEN
-    print("[Connect] هەوڵی بەستنەوە دەدات...")
-    params = {"user": ACCOUNT_ID, "password": PASSWORD, "server": SERVER}
-    try:
-        response = requests.get(f"{API_URL}/ConnectEx", params=params, timeout=30)
-        if response.status_code == 200:
-            SESSION_TOKEN = response.text.replace('"', '').strip()
-            return True
-        return False
-    except:
-        return False
-
-def open_order(cmd_type_str):
-    global highest_price_seen, lowest_price_seen
-    cmd_code = 0 if cmd_type_str.lower() == "buy" else 1
-    print(f"\n[Action] ⚡ VIROS پێچەوانەی کردەوە بۆ: {cmd_type_str.upper()}...")
+def get_token():
+    """پەیوەندی کردن بە سێرڤەری MT5 و وەرگرتنی Token"""
+    url = f"{BASE_URL}/Connect"
     params = {
-        "id": SESSION_TOKEN,
+        "user": MT5_USER,
+        "password": MT5_PASSWORD,
+        "host": MT5_HOST,
+        "port": MT5_PORT
+    }
+    try:
+        response = requests.get(url, params=params, timeout=30)
+        token = response.text.strip('"').strip()
+        print(f"Token بە سەرکەوتوویی وەرگیرا: {token[:8]}***")
+        return token
+    except Exception as e:
+        print(f"هەڵە لە پەیوەستبوون بە سێرڤەر: {e}")
+        return None
+
+def calculate_indicators(closes):
+    """هەژمارکردنی موڤینگ ئەڤرەیج و RSI"""
+    # Exponential Moving Averages
+    weights_9 = np.exp(np.linspace(-1., 0., 9))
+    weights_9 /= weights_9.sum()
+    ema_fast = np.convolve(closes, weights_9, mode='valid')[-1]
+
+    weights_21 = np.exp(np.linspace(-1., 0., 21))
+    weights_21 /= weights_21.sum()
+    ema_slow = np.convolve(closes, weights_21, mode='valid')[-1]
+
+    # RSI (14)
+    deltas = np.diff(closes[-16:])
+    seed = deltas[:14]
+    up = seed[seed >= 0].sum() / 14
+    down = -seed[seed < 0].sum() / 14
+    rs = up / down if down != 0 else 0
+    rsi = 100. - 100. / (1. + rs)
+
+    return ema_fast, ema_slow, rsi
+
+def get_open_positions(token):
+    """پشکنینی پۆزیشنە کراوەکان"""
+    url = f"{BASE_URL}/OpenedOrders"
+    params = {"id": token}
+    try:
+        res = requests.get(url, params=params, timeout=15)
+        orders = res.json()
+        return [o for o in orders if o.get("symbol") == SYMBOL] if isinstance(orders, list) else []
+    except Exception:
+        return []
+
+def send_order(token, operation, price, sl, tp):
+    """ناردنی فەرمانی کڕین یان فرۆشتن"""
+    url = f"{BASE_URL}/OrderSend"
+    params = {
+        "id": token,
         "symbol": SYMBOL,
-        "cmd": cmd_code,
-        "volume": LOT_SIZE
+        "operation": operation,  # "Buy" یان "Sell"
+        "volume": LOT_SIZE,
+        "price": round(price, 2),
+        "stoploss": round(sl, 2),
+        "takeprofit": round(tp, 2)
     }
     try:
-        res = requests.get(f"{API_URL}/OrderSend", params=params, timeout=20)
-        # پاککردنەوەی پێوەرەکان بۆ ئۆردەری نوێ
-        highest_price_seen = 0.0
-        lowest_price_seen = 0.0
-    except:
-        pass
+        res = requests.get(url, params=params, timeout=15)
+        print(f"ئەنجامی ناردنی فەرمان ({operation}): {res.text}")
+    except Exception as e:
+        print(f"هەڵە لە ناردنی فەرمان: {e}")
 
-def modify_sl(ticket, new_sl):
-    new_sl = round(new_sl, 2)
-    params = {
-        "id": SESSION_TOKEN,
-        "ticket": ticket,
-        "sl": new_sl
-    }
-    try:
-        res = requests.get(f"{API_URL}/OrderModify", params=params, timeout=20)
-        if "SAME_PARAMS" not in res.text and res.status_code == 200:
-            print(f"[Trailing] 🛡️ ستۆپ ڕاکێشرا بۆ دوای نرخ: {new_sl}")
-    except:
-        pass
+def main():
+    if not MT5_USER or not MT5_PASSWORD or not MT5_HOST:
+        print("تکایە دڵنیابە لە پڕکردنەوەی MT5_USER، MT5_PASSWORD، و MT5_HOST لە بەشی Variables.")
+        return
 
-def start_sar_engine():
-    global SESSION_TOKEN, highest_price_seen, lowest_price_seen
-    print(f"[VIROS🐉] مەکینەی خێرای کاندڵ و پێچەوانەبوونەوە دەستی پێکرد!")
-    
+    token = get_token()
+    while not token:
+        time.sleep(10)
+        token = get_token()
+
+    print("بۆتەکە دەستی بە چاودێری بازاڕی ئاڵتوون (XAUUSD) کرد...")
+
     while True:
         try:
-            if not SESSION_TOKEN:
-                if not connect_account():
-                    time.sleep(3)
-                    continue
-
-            params = {"id": SESSION_TOKEN}
-            response = requests.get(f"{API_URL}/OpenedOrders", params=params, timeout=10)
+            # وەرگرتنی دوایین نرخی ئاڵتوون
+            quote_res = requests.get(f"{BASE_URL}/QuoteClient", params={"id": token, "symbol": SYMBOL}, timeout=10)
+            quote = quote_res.json()
             
-            if response.status_code == 200:
-                positions = response.json()
-                
-                if isinstance(positions, list) and len(positions) > 0:
-                    pos = positions[0]
-                    ticket = pos.get("Ticket", pos.get("ticket"))
-                    order_type = pos.get("Type", pos.get("orderType", ""))
-                    
-                    sl = pos.get("StopLoss", pos.get("sl"))
-                    sl = float(sl) if sl else 0.0
-                    
-                    open_price = float(pos.get("OpenPrice", pos.get("openPrice", 0)))
-                    current_price = float(pos.get("currentPrice", pos.get("priceCurrent", open_price)))
-                    
-                    last_position["ticket"] = ticket
-                    last_position["type"] = str(order_type)
-                    
-                    is_buy = (str(order_type).lower() == "buy" or order_type == 0)
-                    
-                    # ١. دانانی ستۆپ لۆسی سەرەتایی (١ سەنت زەرەر لە کاتی کردنەوەدا)
-                    if sl == 0:
-                        if is_buy:
-                            initial_sl = open_price - PRICE_GAP
-                            modify_sl(ticket, initial_sl)
-                            highest_price_seen = open_price
-                        else:
-                            initial_sl = open_price + PRICE_GAP
-                            modify_sl(ticket, initial_sl)
-                            lowest_price_seen = open_price
-                    
-                    # ٢. مەکینەی ڕاکێشانی خێرا لە دوای نرخ (Trailing بە خێرایی کاندڵ)
-                    elif current_price > 0:
-                        if is_buy:
-                            # ئەگەر نرخ بەرزتر بووەوە لە بەرزترین خاڵی پێشوو
-                            if current_price > highest_price_seen:
-                                highest_price_seen = current_price
-                                # ستۆپەکە لە دوای نرخەوە بە GAPـی دیاریکراو دەجوڵێت
-                                potential_sl = highest_price_seen - PRICE_GAP
-                                if potential_sl > sl:
-                                    modify_sl(ticket, potential_sl)
-                        else:
-                            # بۆ سێڵ: ئەگەر نرخ نزمتر بووەوە لە نزمترین خاڵی پێشوو
-                            if lowest_price_seen == 0.0 or current_price < lowest_price_seen:
-                                lowest_price_seen = current_price
-                                potential_sl = lowest_price_seen + PRICE_GAP
-                                if potential_sl < sl and potential_sl > 0:
-                                    modify_sl(ticket, potential_sl)
-                else:
-                    # ٣. کاتێک ستۆپ شکێنرا و ئۆردەر نەما، ڕاستەوخۆ پێچەوانەکەی بکەوە
-                    if last_position["ticket"] is not None:
-                        print(f"\n[Reverse] 🚨 ستۆپ شکێنرا! ڕاستەوخۆ ئاڕاستە دەگۆڕێت...")
-                        next_type = "Sell" if (str(last_position["type"]).lower() == "buy" or last_position["type"] == 0) else "Buy"
-                        open_order(next_type)
-                        last_position["ticket"] = None
-                    else:
-                        print("[Start] مەکینە دەست پێدەکات بە Buy...")
-                        open_order("Buy")
-            else:
-                SESSION_TOKEN = ""
+            # وەرگرتنی داتای مۆمەکان
+            hist_res = requests.get(f"{BASE_URL}/QuoteHistory", params={"id": token, "symbol": SYMBOL, "timeframe": TIMEFRAME, "count": 40}, timeout=15)
+            candles = hist_res.json()
+
+            if isinstance(candles, list) and len(candles) >= 30:
+                closes = np.array([c['close'] for c in candles])
+                ask = quote.get("ask", closes[-1])
+                bid = quote.get("bid", closes[-1])
+
+                ema_fast, ema_slow, rsi = calculate_indicators(closes)
+                open_pos = get_open_positions(token)
+
+                # مەرجی کڕین (BUY)
+                if ema_fast > ema_slow and (50 < rsi < 70) and len(open_pos) == 0:
+                    print(f"سیگناڵی کڕین (BUY) | نرخ: {ask} | RSI: {rsi:.1f}")
+                    send_order(token, "Buy", ask, sl=ask - 2.5, tp=ask + 5.0)
+
+                # مەرجی فرۆشتن (SELL)
+                elif ema_fast < ema_slow and (30 < rsi < 50) and len(open_pos) == 0:
+                    print(f"سیگناڵی فرۆشتن (SELL) | نرخ: {bid} | RSI: {rsi:.1f}")
+                    send_order(token, "Sell", bid, sl=bid + 2.5, tp=bid - 5.0)
+
+            time.sleep(60)
 
         except Exception as e:
-            pass
-
-        # خێرایی تەواو: هەر ١ چرکە جارێک چاودێری دەکات
-        time.sleep(1)
+            print(f"تێبینی / هەڵە: {e}")
+            # لە کاتی پچڕانی دانیشتن، دووبارە پەیوەندی نوێ دەکاتەوە
+            token = get_token()
+            time.sleep(10)
 
 if __name__ == "__main__":
-    start_sar_engine()
+    main()
