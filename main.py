@@ -5,18 +5,22 @@ import numpy as np
 
 BASE_URL = "https://mt5.mtapi.io"
 
-# زانیاری هەژماری MT5 لە ڕێگەی Variables لەسەر Railway وەردەگیرێت
-MT5_USER = os.getenv("MT5_USER")          # ژمارەی هەژمارەکەت (Account Number)
-MT5_PASSWORD = os.getenv("MT5_PASSWORD")  # تێپەڕەوشەی هەژمارەکەت (Password)
-MT5_HOST = os.getenv("MT5_HOST")          # هۆست یان ئایپی برۆکەر (بۆ نموونە: 198.51.100.1 یان ناوی سێرڤەر)
-MT5_PORT = os.getenv("MT5_PORT", "443")   # پۆرت (بە گشتی 443 یان 1950)
+# زانیارییەکان لە Variables لە Railway دەخوێندرێنەوە
+MT5_USER = os.getenv("MT5_USER")
+MT5_PASSWORD = os.getenv("MT5_PASSWORD")
+MT5_HOST = os.getenv("MT5_HOST")
+MT5_PORT = os.getenv("MT5_PORT", "443")
 
-SYMBOL = "XAUUSD"
+# هێمای بیتکۆین (ئەگەر برۆکەرەکەت پاشگری هەیە وەک BTCUSDm لێرە بیگۆڕە)
+SYMBOL = os.getenv("SYMBOL", "BTCUSD")
 LOT_SIZE = 0.01
-TIMEFRAME = 1  # 1 خولەکی (M1)
+TIMEFRAME = 5  # تایم فڕەیمی ٥ خولەکی (M5) زۆر گونجاوترە بۆ بیتکۆین
+
+# ڕێژەی ستۆپ لۆس و تێک پرۆفیت بەپێی نرخی بیتکۆین
+SL_PERCENT = 0.008  # 0.8% ستۆپ لۆس (نزیکەی ٥٠٠ بۆ ٨٠٠ دۆلار بەپێی نرخ)
+TP_PERCENT = 0.016  # 1.6% تێک پرۆفیت (نزیکەی ١٠٠٠ بۆ ١٦٠٠ دۆلار)
 
 def get_token():
-    """پەیوەندی کردن بە سێرڤەری MT5 و وەرگرتنی Token"""
     url = f"{BASE_URL}/Connect"
     params = {
         "user": MT5_USER,
@@ -27,22 +31,21 @@ def get_token():
     try:
         response = requests.get(url, params=params, timeout=30)
         token = response.text.strip('"').strip()
-        print(f"Token بە سەرکەوتوویی وەرگیرا: {token[:8]}***")
+        print(f"پەیوەست بوو! Token: {token[:8]}***")
         return token
     except Exception as e:
-        print(f"هەڵە لە پەیوەستبوون بە سێرڤەر: {e}")
+        print(f"هەڵە لە پەیوەستبوون بە سێرڤەری MT5: {e}")
         return None
 
 def calculate_indicators(closes):
-    """هەژمارکردنی موڤینگ ئەڤرەیج و RSI"""
-    # Exponential Moving Averages
-    weights_9 = np.exp(np.linspace(-1., 0., 9))
-    weights_9 /= weights_9.sum()
-    ema_fast = np.convolve(closes, weights_9, mode='valid')[-1]
+    # Exponential Moving Averages (EMA 9, EMA 21)
+    w_fast = np.exp(np.linspace(-1., 0., 9))
+    w_fast /= w_fast.sum()
+    ema_fast = np.convolve(closes, w_fast, mode='valid')[-1]
 
-    weights_21 = np.exp(np.linspace(-1., 0., 21))
-    weights_21 /= weights_21.sum()
-    ema_slow = np.convolve(closes, weights_21, mode='valid')[-1]
+    w_slow = np.exp(np.linspace(-1., 0., 21))
+    w_slow /= w_slow.sum()
+    ema_slow = np.convolve(closes, w_slow, mode='valid')[-1]
 
     # RSI (14)
     deltas = np.diff(closes[-16:])
@@ -55,7 +58,6 @@ def calculate_indicators(closes):
     return ema_fast, ema_slow, rsi
 
 def get_open_positions(token):
-    """پشکنینی پۆزیشنە کراوەکان"""
     url = f"{BASE_URL}/OpenedOrders"
     params = {"id": token}
     try:
@@ -66,12 +68,11 @@ def get_open_positions(token):
         return []
 
 def send_order(token, operation, price, sl, tp):
-    """ناردنی فەرمانی کڕین یان فرۆشتن"""
     url = f"{BASE_URL}/OrderSend"
     params = {
         "id": token,
         "symbol": SYMBOL,
-        "operation": operation,  # "Buy" یان "Sell"
+        "operation": operation,
         "volume": LOT_SIZE,
         "price": round(price, 2),
         "stoploss": round(sl, 2),
@@ -79,13 +80,13 @@ def send_order(token, operation, price, sl, tp):
     }
     try:
         res = requests.get(url, params=params, timeout=15)
-        print(f"ئەنجامی ناردنی فەرمان ({operation}): {res.text}")
+        print(f"فەرمانی بازرگانی جێبەجێ کرا ({operation}): {res.text}")
     except Exception as e:
         print(f"هەڵە لە ناردنی فەرمان: {e}")
 
 def main():
     if not MT5_USER or not MT5_PASSWORD or not MT5_HOST:
-        print("تکایە دڵنیابە لە پڕکردنەوەی MT5_USER، MT5_PASSWORD، و MT5_HOST لە بەشی Variables.")
+        print("تکایە دڵنیابە لە دانانی زانیارییەکان لە بەشی Variables.")
         return
 
     token = get_token()
@@ -93,41 +94,45 @@ def main():
         time.sleep(10)
         token = get_token()
 
-    print("بۆتەکە دەستی بە چاودێری بازاڕی ئاڵتوون (XAUUSD) کرد...")
+    print(f"بۆتی بیتکۆین دەستی بە چاودێری بازاڕی {SYMBOL} کرد...")
 
     while True:
         try:
-            # وەرگرتنی دوایین نرخی ئاڵتوون
+            # وەرگرتنی نرخی ڕاستەوخۆی بیتکۆین
             quote_res = requests.get(f"{BASE_URL}/QuoteClient", params={"id": token, "symbol": SYMBOL}, timeout=10)
             quote = quote_res.json()
-            
-            # وەرگرتنی داتای مۆمەکان
+
+            # وەرگرتنی مۆمەکانی ڕابردوو
             hist_res = requests.get(f"{BASE_URL}/QuoteHistory", params={"id": token, "symbol": SYMBOL, "timeframe": TIMEFRAME, "count": 40}, timeout=15)
             candles = hist_res.json()
 
             if isinstance(candles, list) and len(candles) >= 30:
                 closes = np.array([c['close'] for c in candles])
-                ask = quote.get("ask", closes[-1])
-                bid = quote.get("bid", closes[-1])
+                ask = float(quote.get("ask", closes[-1]))
+                bid = float(quote.get("bid", closes[-1]))
 
                 ema_fast, ema_slow, rsi = calculate_indicators(closes)
                 open_pos = get_open_positions(token)
 
                 # مەرجی کڕین (BUY)
                 if ema_fast > ema_slow and (50 < rsi < 70) and len(open_pos) == 0:
-                    print(f"سیگناڵی کڕین (BUY) | نرخ: {ask} | RSI: {rsi:.1f}")
-                    send_order(token, "Buy", ask, sl=ask - 2.5, tp=ask + 5.0)
+                    sl = ask * (1 - SL_PERCENT)
+                    tp = ask * (1 + TP_PERCENT)
+                    print(f"سیگناڵی کڕینی بیتکۆین (BUY) | نرخ: {ask:.2f} | RSI: {rsi:.1f}")
+                    send_order(token, "Buy", ask, sl=sl, tp=tp)
 
                 # مەرجی فرۆشتن (SELL)
                 elif ema_fast < ema_slow and (30 < rsi < 50) and len(open_pos) == 0:
-                    print(f"سیگناڵی فرۆشتن (SELL) | نرخ: {bid} | RSI: {rsi:.1f}")
-                    send_order(token, "Sell", bid, sl=bid + 2.5, tp=bid - 5.0)
+                    sl = bid * (1 + SL_PERCENT)
+                    tp = bid * (1 - TP_PERCENT)
+                    print(f"سیگناڵی فرۆشتنی بیتکۆین (SELL) | نرخ: {bid:.2f} | RSI: {rsi:.1f}")
+                    send_order(token, "Sell", bid, sl=sl, tp=tp)
 
+            # چاوەڕوانکردنی کاتی مۆمی نوێ
             time.sleep(60)
 
         except Exception as e:
-            print(f"تێبینی / هەڵە: {e}")
-            # لە کاتی پچڕانی دانیشتن، دووبارە پەیوەندی نوێ دەکاتەوە
+            print(f"تێبینی / پچڕان: {e}")
             token = get_token()
             time.sleep(10)
 
