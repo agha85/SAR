@@ -7,15 +7,18 @@ ACCOUNT_ID = os.getenv("MT5_ACCOUNT")
 PASSWORD = os.getenv("MT5_PASSWORD")
 SERVER = os.getenv("MT5_SERVER")
 
-# قەبارەی ئۆردەرە نوێیەکان بەپێی داواکاری خۆت
-LOT_SIZE = 0.01
+# --- ڕێکخستنە سەرەکییەکانی VIROS ---
+SYMBOL = "BITCOIN"     # ناوەکەی وەک خۆی بهێڵەوە، یان سبەینێ بیگۆڕە بۆ GOLD یان XAUUSD
+LOT_SIZE = 0.01        # قەبارەی ئۆردەر
+GAP_SIZE = 0.10        # بۆشایی ستۆپ لۆس (١٠ سەنت)
+# -----------------------------------
+
 SESSION_TOKEN = ""
 
-# مێشکی بۆتەکە بۆ بیرکەوتنەوەی دواین ئۆردەری کراوە
+# مێشکی بۆتەکە بۆ چاودێریکردنی ئۆردەرەکە
 last_position = {
     "ticket": None,
-    "type": None,  # 0 بۆ Buy، 1 بۆ Sell
-    "symbol": None
+    "type": None
 }
 
 def connect_account():
@@ -32,83 +35,101 @@ def connect_account():
     except:
         return False
 
-def send_reverse_order(symbol, cmd_type):
-    type_name = "Buy" if cmd_type == 0 else "Sell"
-    print(f"\n[Reverse Action] ⚠️ VIROS ئۆردەری پێچەوانە دەکاتەوە: {type_name} بە قەبارەی {LOT_SIZE}...")
-    
+def open_order(cmd_type_str):
+    cmd_code = 0 if cmd_type_str.lower() == "buy" else 1
+    print(f"\n[Action] ⚡ VIROS ئۆردەری پێچەوانە دەکاتەوە: {cmd_type_str.upper()}...")
     params = {
         "id": SESSION_TOKEN,
-        "symbol": symbol,
-        "cmd": cmd_type,  # 0 بۆ Buy وە 1 بۆ Sell
+        "symbol": SYMBOL,
+        "cmd": cmd_code,
         "volume": LOT_SIZE
     }
     try:
-        # ناردنی فەرمانی کردنەوەی ئۆردەری نوێ بۆ برۆکەر
-        response = requests.get(f"{API_URL}/OrderSend", params=params, timeout=20)
-        print(f"[Order Result] وەڵامی برۆکەر: {response.text}\n")
+        res = requests.get(f"{API_URL}/OrderSend", params=params, timeout=20)
+        print(f"[Result] وەڵام: {res.text}\n")
     except Exception as e:
-        print(f"[Error] کێشە لە کردنەوەی ئۆردەری نوێ: {e}")
+        print(f"[Error] هەڵە لە کردنەوە: {e}")
+
+def modify_sl(ticket, new_sl):
+    new_sl = round(new_sl, 2)
+    params = {
+        "id": SESSION_TOKEN,
+        "ticket": ticket,
+        "sl": new_sl
+    }
+    try:
+        res = requests.get(f"{API_URL}/OrderModify", params=params, timeout=20)
+        if "SAME_PARAMS" not in res.text:
+            print(f"[Trailing] 🛡️ قەڵغان ڕاکێشرا بۆ: {new_sl}")
+    except:
+        pass
 
 def start_sar_engine():
     global SESSION_TOKEN
-    print(f"[VIROS🐉] مەکینەی SAR (وەستان و پێچەوانەبوونەوە) دەستی پێکرد | Account: {ACCOUNT_ID}")
+    print(f"[VIROS🐉] مەکینەی زۆر خێرای پێچەوانەبوونەوە (Zero Spread) دەستی پێکرد!")
     
     while True:
         try:
             if not SESSION_TOKEN:
                 if not connect_account():
-                    time.sleep(15)
+                    time.sleep(5)
                     continue
 
             params = {"id": SESSION_TOKEN}
-            response = requests.get(f"{API_URL}/OpenedOrders", params=params, timeout=20)
+            response = requests.get(f"{API_URL}/OpenedOrders", params=params, timeout=10)
             
             if response.status_code == 200:
                 positions = response.json()
                 
                 if isinstance(positions, list) and len(positions) > 0:
-                    # وەرگرتنی زانیاری یەکەم ئۆردەری کراوە
                     pos = positions[0]
                     ticket = pos.get("Ticket", pos.get("ticket"))
-                    pos_type = pos.get("Type", pos.get("orderType"))
-                    symbol = pos.get("Symbol", pos.get("symbol"))
+                    order_type = pos.get("Type", pos.get("orderType", ""))
+                    
                     sl = pos.get("StopLoss", pos.get("sl"))
+                    sl = float(sl) if sl else 0.0
                     
-                    print(f"[Tracking] چاودێری ئۆردەری {ticket} دەکات | جۆر: {pos_type} | SL: {sl}")
+                    open_price = float(pos.get("OpenPrice", pos.get("openPrice", 0)))
+                    current_price = float(pos.get("currentPrice", pos.get("priceCurrent", open_price)))
                     
-                    # زەخیرەکردنی ئەم ئۆردەرە لە مێشکی بۆتەکەدا بۆ ئەوەی بزانێت کەی لە ستۆپ دەدات
                     last_position["ticket"] = ticket
-                    last_position["type"] = pos_type
-                    last_position["symbol"] = symbol
+                    last_position["type"] = str(order_type)
                     
-                    # تێبینی: بەشی ڕاکێشانی ستۆپ لۆسەکە لێرەدا کار دەکات کە داتای SARـمان خستە سەر
+                    # دانانی ستۆپ لۆس ئەگەر نەبوو
+                    if sl == 0:
+                        if str(order_type).lower() == "buy" or order_type == 0:
+                            modify_sl(ticket, open_price - GAP_SIZE)
+                        else:
+                            modify_sl(ticket, open_price + GAP_SIZE)
                     
+                    # جوڵاندنی ستۆپ لۆس لەگەڵ قازانج
+                    elif current_price > 0 and current_price != open_price:
+                        if str(order_type).lower() == "buy" or order_type == 0:
+                            potential_sl = current_price - GAP_SIZE
+                            if potential_sl > sl:
+                                modify_sl(ticket, potential_sl)
+                        else:
+                            potential_sl = current_price + GAP_SIZE
+                            if potential_sl < sl and potential_sl > 0:
+                                modify_sl(ticket, potential_sl)
                 else:
-                    # ئەگەر هیچ ئۆردەرێک نەبوو، پشکنین دەکات بزانێت ئایا پێشتر ئۆردەرمان هەبووە؟
+                    # ئەگەر لە ستۆپی دا، یەکسەر ئۆردەری پێچەوانە دەکاتەوە
                     if last_position["ticket"] is not None:
-                        print(f"[Trigger] 🚨 ئۆردەری ژمارە {last_position['ticket']} لە ستۆپی دا و داخرا!")
-                        
-                        # بڕیاردان بۆ ئۆردەری پێچەوانە
-                        if last_position["type"] == 0:  # ئەگەر ئۆردەرە داخراوەکە Buy بوو
-                            send_reverse_order(last_position["symbol"], 1)  # ڕاستەوخۆ Sell بکە
-                        elif last_position["type"] == 1:  # ئەگەر ئۆردەرە داخراوەکە Sell بوو
-                            send_reverse_order(last_position["symbol"], 0)  # ڕاستەوخۆ Buy بکە
-                            
-                        # خاوێنکردنەوەی مێشکی بۆتەکە بۆ ئەوەی هەر هەمان ئۆردەر دووبارە نەکاتەوە
+                        print(f"\n[Reverse] 🚨 لە ستۆپی دا! ڕاستەوخۆ پێچەوانەی دەکاتەوە...")
+                        next_type = "Sell" if (str(last_position["type"]).lower() == "buy" or last_position["type"] == 0) else "Buy"
+                        open_order(next_type)
                         last_position["ticket"] = None
-                        last_position["type"] = None
-                        last_position["symbol"] = None
                     else:
-                        print("[Idle] هیچ ئۆردەرێکی کراوە نییە. چاوەڕێی دەستپێک دەکات...")
-                        
+                        print("[Start] مەکینەکە بە ئامادەیی چاوەڕێی یەکەم ئۆردەر دەکات...")
+                        open_order("Buy")
             else:
                 SESSION_TOKEN = ""
 
         except Exception as e:
-            print(f"[Loop Error] {e}")
+            pass
 
-        # هەر ٥ چرکە جارێک پشکنین دەکات بۆ ئەوەی زۆر خێرا بێت لە کاتی لێدانی ستۆپ
-        time.sleep(5)
+        # خێرایی مەکینەکە (١ چرکە)
+        time.sleep(1)
 
 if __name__ == "__main__":
     start_sar_engine()
